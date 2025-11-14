@@ -78,12 +78,15 @@
         };
 
         const sanitizeABCDetails = (details) => {
-            if (!details) return details;
+            if (!details) return null;
             const sanitized = {};
             Object.entries(details).forEach(([key, value]) => {
-                sanitized[sanitizeFirebaseKey(key)] = value;
+                // Only include non-undefined values (Firebase doesn't accept undefined)
+                if (value !== undefined) {
+                    sanitized[sanitizeFirebaseKey(key)] = value;
+                }
             });
-            return sanitized;
+            return Object.keys(sanitized).length > 0 ? sanitized : null;
         };
 
         const desanitizeABCDetails = (details) => {
