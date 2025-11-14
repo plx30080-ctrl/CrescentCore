@@ -260,13 +260,21 @@
                     // Sanitize all ABC details before saving to Firebase
                     const sanitizedData = {};
                     Object.entries(data).forEach(([name, associateData]) => {
-                        sanitizedData[name] = {
-                            ...associateData,
-                            abc: associateData.abc ? {
-                                ...associateData.abc,
-                                details: sanitizeABCDetails(associateData.abc.details)
-                            } : associateData.abc
-                        };
+                        const sanitizedAssociate = { ...associateData };
+
+                        // Handle ABC data - Firebase doesn't allow undefined values
+                        if (associateData.abc) {
+                            const sanitizedDetails = sanitizeABCDetails(associateData.abc.details);
+                            sanitizedAssociate.abc = {
+                                total: associateData.abc.total || 0,
+                                details: sanitizedDetails
+                            };
+                        } else if (associateData.abc === undefined) {
+                            // Convert undefined to null for Firebase
+                            sanitizedAssociate.abc = null;
+                        }
+
+                        sanitizedData[name] = sanitizedAssociate;
                     });
 
                     // Store data under the specific week
