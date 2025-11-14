@@ -70,6 +70,50 @@
             'Attitude w/ Peers'
         ];
 
+        // Firebase key sanitization utilities
+        // Firebase keys cannot contain: . # $ / [ ]
+        const sanitizeFirebaseKey = (key) => {
+            if (!key) return key;
+            return key.replace(/[.#$\/\[\]]/g, '_');
+        };
+
+        const sanitizeABCDetails = (details) => {
+            if (!details) return details;
+            const sanitized = {};
+            Object.entries(details).forEach(([key, value]) => {
+                sanitized[sanitizeFirebaseKey(key)] = value;
+            });
+            return sanitized;
+        };
+
+        const desanitizeABCDetails = (details) => {
+            if (!details) return details;
+            const desanitized = {};
+            Object.entries(details).forEach(([sanitizedKey, value]) => {
+                // Find the original category name that matches this sanitized key
+                const originalKey = ABC_CATEGORIES.find(cat => sanitizeFirebaseKey(cat) === sanitizedKey);
+                if (originalKey) {
+                    desanitized[originalKey] = value;
+                }
+            });
+            return desanitized;
+        };
+
+        const desanitizeAssociates = (associates) => {
+            if (!associates) return associates;
+            const desanitized = {};
+            Object.entries(associates).forEach(([name, data]) => {
+                desanitized[name] = {
+                    ...data,
+                    abc: data.abc ? {
+                        ...data.abc,
+                        details: desanitizeABCDetails(data.abc.details)
+                    } : data.abc
+                };
+            });
+            return desanitized;
+        };
+
         function CrescentHoursTracker() {
             const [associates, setAssociates] = useState({});
             const [weekEnding, setWeekEnding] = useState('');
@@ -166,7 +210,8 @@
                 weekRef.on('value', (snapshot) => {
                     const data = snapshot.val();
                     if (data) {
-                        setAssociates(data.associates || {});
+                        // Desanitize ABC details when loading from Firebase
+                        setAssociates(desanitizeAssociates(data.associates || {}));
                         setWeekEnding(selectedWeek);
                     }
                 });
@@ -205,20 +250,32 @@
 
             const saveToFirebase = async (data, week) => {
                 if (!database) return;
-                
+
                 try {
                     setSyncStatus('Syncing...');
-                    
+
+                    // Sanitize all ABC details before saving to Firebase
+                    const sanitizedData = {};
+                    Object.entries(data).forEach(([name, associateData]) => {
+                        sanitizedData[name] = {
+                            ...associateData,
+                            abc: associateData.abc ? {
+                                ...associateData.abc,
+                                details: sanitizeABCDetails(associateData.abc.details)
+                            } : associateData.abc
+                        };
+                    });
+
                     // Store data under the specific week
                     await database.ref(`weeks/${week}`).set({
-                        associates: data,
+                        associates: sanitizedData,
                         weekEnding: week,
                         lastUpdated: new Date().toISOString()
                     });
-                    
+
                     // Update selected week to the newly saved week
                     setSelectedWeek(week);
-                    
+
                     setSyncStatus('Connected');
                 } catch (error) {
                     console.error('Error saving to Firebase:', error);
@@ -351,7 +408,7 @@
 
                     // Merge with existing data for this week OR current associates (preserve status, notes, ABC)
                     const mergedAssociates = {};
-                    
+
                     // First check if we're updating an existing week
                     let existingWeekData = {};
                     if (weekEnding === selectedWeek) {
@@ -361,10 +418,11 @@
                         const snapshot = await database.ref(`weeks/${weekEnding}`).once('value');
                         const data = snapshot.val();
                         if (data && data.associates) {
-                            existingWeekData = data.associates;
+                            // Desanitize ABC details when loading from Firebase
+                            existingWeekData = desanitizeAssociates(data.associates);
                         }
                     }
-                    
+
                     Object.entries(dawkAssociates).forEach(([name, newData]) => {
                         if (existingWeekData[name]) {
                             // Preserve existing status, notes, and ABC
@@ -412,6 +470,7 @@
                     }
                 };
                 setAssociates(updated);
+                // Sanitization is handled in saveToFirebase
                 await saveToFirebase(updated, weekEnding);
                 setEditingABC(null);
             };
