@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crescent Core Hours Tracker</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .highlight-orange {
+            background-color: #fed7aa;
+        }
+        .highlight-yellow {
+            background-color: #fef08a;
+        }
+        .config-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+        // Status options for dropdown
+        const STATUS_OPTIONS = [
+            '',
+            'Core Associate',
+            'Core Associate - New',
+            'Within 40 Hours',
+            'Indirect',
+            'Delete',
+            'Under Review'
+        ];
+
+        // ABC Categories with proper scoring
+        const ABC_CATEGORIES = [
+            'Accuracy',
+            'Completeness',
+            'Use of Time',
+            'Job Efficiency',
+            'Clean Work Area',
+            'Safety',
+            'Job Knowledge',
+            'Flexibility and Cooperation',
+            'Initiative',
+            'Equipment Utilization',
+            'Reliability',
+            'Attendance',
+            'Attitude w/ Leadership',
+            'Attitude w/ Peers'
+        ];
+
+        function CrescentHoursTracker() {
+            const [associates, setAssociates] = useState({});
+            const [weekEnding, setWeekEnding] = useState('');
+            const [selectedWeek, setSelectedWeek] = useState(''); // For viewing historical data
+            const [availableWeeks, setAvailableWeeks] = useState([]);
+            const [uploadedFiles, setUploadedFiles] = useState({ dawk: null, ldst: null, ld5w: null });
+            const [activeView, setActiveView] = useState('upload');
+            const [processing, setProcessing] = useState(false);
+            const [lastWeekData, setLastWeekData] = useState({});
+            const [editingAssociate, setEditingAssociate] = useState(null);
+            const [editingABC, setEditingABC] = useState(null);
+            const [filterStatus, setFilterStatus] = useState({ showDelete: false, showIndirect: false });
+            const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+            const [abcSearchTerm, setAbcSearchTerm] = useState('');
+            
+            // Firebase configuration state
+            const [firebaseConfig, setFirebaseConfig] = useState(null);
+            const [firebaseInitialized, setFirebaseInitialized] = useState(false);
+            const [showConfig, setShowConfig] = useState(false);
+            const [database, setDatabase] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [syncStatus, setSyncStatus] = useState('Disconnected');
+
+            // Pre-configured Firebase settings
+            useEffect(() => {
+                const config = {
+                    apiKey: "AIzaSyC2nzjfwl8J31TxGm8XMfmIOaUOpgFy1W8",
+                    authDomain: "hours-reporting-eaecc.firebaseapp.com",
+                    databaseURL: "https://hours-reporting-eaecc-default-rtdb.firebaseio.com",
+                    projectId: "hours-reporting-eaecc",
+                    storageBucket: "hours-reporting-eaecc.firebasestorage.app",
+                    messagingSenderId: "404886435461",
+                    appId: "1:404886435461:web:a0568f745f9b15a6875bec",
+                    measurementId: "G-S8XX0K6PCE"
+                };
+                
+                initializeFirebase(config);
+            }, []);
+
+            const initializeFirebase = (config) => {
+                try {
+                    if (!firebase.apps.length) {
+                        firebase.initializeApp(config);
+                    }
+                    const db = firebase.database();
+                    setDatabase(db);
+                    setFirebaseConfig(config);
+                    setFirebaseInitialized(true);
+                    setSyncStatus('Connected');
+                    
+                    // Load data from Firebase
+                    loadFromFirebase(db);
+                } catch (error) {
+                    console.error('Firebase initialization error:', error);
+                    alert('Error connecting to Firebase. Please check your configuration.');
+                    setShowConfig(true);
+                    setLoading(false);
+                }
+            };
+
+            const loadFromFirebase = (db) => {
+                // Load list of all available weeks
+                const weeksRef = db.ref('weeks');
+                weeksRef.on('value', (snapshot) => {
+                    const weeksData = snapshot.val();
+                    if (weeksData) {
+                        const weeksList = Object.keys(weeksData).sort().reverse(); // Most recent first
+                        setAvailableWeeks(weeksList);
+                        
+                        // Auto-select most recent week if none selected
+                        if (!selectedWeek && weeksList.length > 0) {
+                            setSelectedWeek(weeksList[0]);
+                        }
+                    }
+                    setLoading(false);
+                });
+
+                // Handle connection status
+                const connectedRef = db.ref('.info/connected');
+                connectedRef.on('value', (snap) => {
+                    if (snap.val() === true) {
+                        setSyncStatus('Connected');
+                    } else {
+                        setSyncStatus('Disconnected');
+                    }
+                });
+            };
+
+            // Load data for selected week
+            useEffect(() => {
+                if (!database || !selectedWeek) return;
+
+                const weekRef = database.ref(`weeks/${selectedWeek}`);
+                weekRef.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setAssociates(data.associates || {});
+                        setWeekEnding(selectedWeek);
+                    }
+                });
+
+                return () => weekRef.off();
+            }, [database, selectedWeek]);
+
+            // Calculate last week data when selected week changes
+            useEffect(() => {
+                if (!database || !selectedWeek || availableWeeks.length === 0) return;
+
+                const currentIndex = availableWeeks.indexOf(selectedWeek);
+                if (currentIndex < availableWeeks.length - 1) {
+                    const previousWeek = availableWeeks[currentIndex + 1];
+                    const prevWeekRef = database.ref(`weeks/${previousWeek}`);
+                    
+                    prevWeekRef.once('value', (snapshot) => {
+                        const data = snapshot.val();
+                        if (data && data.associates) {
+                            const lastWeekSnapshot = {};
+                            Object.entries(data.associates).forEach(([name, assoc]) => {
+                                lastWeekSnapshot[name] = {
+                                    totalHours: assoc.totalHours,
+                                    status: assoc.status
+                                };
+                            });
+                            setLastWeekData(lastWeekSnapshot);
+                        } else {
+                            setLastWeekData({});
+                        }
+                    });
+                } else {
+                    setLastWeekData({});
+                }
+            }, [database, selectedWeek, availableWeeks]);
+
+            const saveToFirebase = async (data, week) => {
+                if (!database) return;
+                
+                try {
+                    setSyncStatus('Syncing...');
+                    
+                    // Store data under the specific week
+                    await database.ref(`weeks/${week}`).set({
+                        associates: data,
+                        weekEnding: week,
+                        lastUpdated: new Date().toISOString()
+                    });
+                    
+                    // Update selected week to the newly saved week
+                    setSelectedWeek(week);
+                    
+                    setSyncStatus('Connected');
+                } catch (error) {
+                    console.error('Error saving to Firebase:', error);
+                    setSyncStatus('Error');
+                    alert('Error saving data. Please check your connection.');
+                }
+            };
+
+            const handleConfigSubmit = (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                
+                const config = {
+                    apiKey: formData.get('apiKey'),
+                    authDomain: formData.get('authDomain'),
+                    databaseURL: formData.get('databaseURL'),
+                    projectId: formData.get('projectId'),
+                    storageBucket: formData.get('storageBucket'),
+                    messagingSenderId: formData.get('messagingSenderId'),
+                    appId: formData.get('appId')
+                };
+
+                // Save to localStorage
+                localStorage.setItem('firebaseConfig', JSON.stringify(config));
+                
+                // Initialize Firebase
+                initializeFirebase(config);
+                setShowConfig(false);
+            };
+
+            const handleFileUpload = (fileType, event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    setUploadedFiles(prev => ({ ...prev, [fileType]: file }));
+                }
+            };
+
+            const parseExcelFile = (file, skipRows = 0) => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = new Uint8Array(e.target.result);
+                            const workbook = XLSX.read(data, { type: 'array' });
+                            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                            const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: false });
+                            
+                            const cleanData = jsonData.slice(skipRows);
+                            resolve(cleanData);
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(file);
+                });
+            };
+
+            const processFiles = async () => {
+                if (!uploadedFiles.dawk || !uploadedFiles.ldst || !uploadedFiles.ld5w) {
+                    alert('Please upload all three files (DAWK, LDST, and LD5W)');
+                    return;
+                }
+
+                if (!weekEnding) {
+                    alert('Please enter a week ending date');
+                    return;
+                }
+
+                setProcessing(true);
+
+                try {
+                    const dawkData = await parseExcelFile(uploadedFiles.dawk, 5);
+                    const dawkAssociates = {};
+                    
+                    dawkData.forEach(row => {
+                        if (row[1] && row[1] !== 'Employee' && row[3]) {
+                            const name = String(row[1]).trim();
+                            const daysWorked = parseFloat(row[2]) || 0;
+                            const totalHours = parseFloat(row[3]) || 0;
+                            
+                            if (name && totalHours > 0) {
+                                dawkAssociates[name] = {
+                                    name,
+                                    daysWorked,
+                                    totalHours,
+                                    shift: null,
+                                    startDate: null,
+                                    avg5Week: 0,
+                                    abc: null,
+                                    status: '',
+                                    notes: '',
+                                    weekEnding
+                                };
+                            }
+                        }
+                    });
+
+                    const ldstData = await parseExcelFile(uploadedFiles.ldst, 4);
+                    
+                    ldstData.forEach(row => {
+                        if (row[0] && row[1] && row[0] !== 'First Name') {
+                            const firstName = String(row[0]).trim();
+                            const lastName = String(row[1]).trim();
+                            const name = `${lastName.toUpperCase()}, ${firstName.toUpperCase()}`;
+                            const startDate = row[2] || '';
+                            const shift = row[4] || '';
+                            
+                            if (dawkAssociates[name]) {
+                                dawkAssociates[name].startDate = startDate;
+                                dawkAssociates[name].shift = shift;
+                            }
+                        }
+                    });
+
+                    const ld5wData = await parseExcelFile(uploadedFiles.ld5w, 3);
+                    
+                    ld5wData.forEach(row => {
+                        if (row[1] && row[8]) {
+                            const name = String(row[1]).trim();
+                            const avgTot = parseFloat(row[8]) || 0;
+                            
+                            if (dawkAssociates[name]) {
+                                if (dawkAssociates[name].avg5Week < avgTot) {
+                                    dawkAssociates[name].avg5Week = avgTot;
+                                }
+                            }
+                        }
+                    });
+
+                    // Merge with existing data for this week OR current associates (preserve status, notes, ABC)
+                    const mergedAssociates = {};
+                    
+                    // First check if we're updating an existing week
+                    let existingWeekData = {};
+                    if (weekEnding === selectedWeek) {
+                        existingWeekData = associates;
+                    } else if (database) {
+                        // Load existing week data if it exists
+                        const snapshot = await database.ref(`weeks/${weekEnding}`).once('value');
+                        const data = snapshot.val();
+                        if (data && data.associates) {
+                            existingWeekData = data.associates;
+                        }
+                    }
+                    
+                    Object.entries(dawkAssociates).forEach(([name, newData]) => {
+                        if (existingWeekData[name]) {
+                            // Preserve existing status, notes, and ABC
+                            mergedAssociates[name] = {
+                                ...newData,
+                                status: existingWeekData[name].status || '',
+                                notes: existingWeekData[name].notes || '',
+                                abc: existingWeekData[name].abc || null
+                            };
+                        } else {
+                            mergedAssociates[name] = newData;
+                        }
+                    });
+
+                    setAssociates(mergedAssociates);
+                    await saveToFirebase(mergedAssociates, weekEnding);
+                    setProcessing(false);
+                    setActiveView('allAssociates');
+                    alert('Files processed successfully!');
+                } catch (error) {
+                    console.error('Error processing files:', error);
+                    alert('Error processing files: ' + error.message);
+                    setProcessing(false);
+                }
+            };
+
+            const updateAssociateStatus = async (name, field, value) => {
+                const updated = {
+                    ...associates,
+                    [name]: {
+                        ...associates[name],
+                        [field]: value
+                    }
+                };
+                setAssociates(updated);
+                await saveToFirebase(updated, weekEnding);
+            };
+
+            const updateAssociateABC = async (name, abcData) => {
+                const updated = {
+                    ...associates,
+                    [name]: {
+                        ...associates[name],
+                        abc: abcData
+                    }
+                };
+                setAssociates(updated);
+                await saveToFirebase(updated, weekEnding);
+                setEditingABC(null);
+            };
+
+            const sortAssociates = (data, key) => {
+                if (!key) return data;
+
+                const sorted = [...data].sort((a, b) => {
+                    let aVal = a[key];
+                    let bVal = b[key];
+
+                    if (key === 'abc') {
+                        aVal = a.abc ? a.abc.total : 0;
+                        bVal = b.abc ? b.abc.total : 0;
+                    }
+
+                    if (aVal == null) aVal = '';
+                    if (bVal == null) bVal = '';
+
+                    if (typeof aVal === 'string') {
+                        return sortConfig.direction === 'asc' 
+                            ? aVal.localeCompare(bVal)
+                            : bVal.localeCompare(aVal);
+                    } else {
+                        return sortConfig.direction === 'asc'
+                            ? aVal - bVal
+                            : bVal - aVal;
+                    }
+                });
+
+                return sorted;
+            };
+
+            const handleSort = (key) => {
+                let direction = 'asc';
+                if (sortConfig.key === key && sortConfig.direction === 'asc') {
+                    direction = 'desc';
+                }
+                setSortConfig({ key, direction });
+            };
+
+            const getSortIndicator = (key) => {
+                if (sortConfig.key !== key) return ' ↕';
+                return sortConfig.direction === 'asc' ? ' ↑' : ' ↓';
+            };
+
+            const getFilteredAssociates = () => {
+                return Object.values(associates).filter(a => {
+                    const meetsHours = a.totalHours >= 680;
+                    const meetsStatus = !['Delete', 'Indirect'].includes(a.status) || 
+                                       (a.status === 'Delete' && filterStatus.showDelete) ||
+                                       (a.status === 'Indirect' && filterStatus.showIndirect);
+                    return meetsHours && meetsStatus;
+                });
+            };
+
+            const getSummaryStats = () => {
+                const filtered = getFilteredAssociates().filter(a => a.totalHours >= 480);
+                
+                const stats = {
+                    total: filtered.length,
+                    shift1: filtered.filter(a => a.shift === '1' || a.shift === 1).length,
+                    shift2: filtered.filter(a => a.shift === '2' || a.shift === 2).length,
+                    newCore: 0,
+                    within40: 0,
+                    changes: []
+                };
+
+                filtered.forEach(associate => {
+                    if (lastWeekData[associate.name]) {
+                        const lastWeekHours = lastWeekData[associate.name].totalHours || 0;
+                        if (associate.totalHours >= 720 && lastWeekHours < 720) {
+                            stats.newCore++;
+                        }
+
+                        const lastWeekStatus = lastWeekData[associate.name].status;
+                        if (lastWeekStatus !== associate.status) {
+                            stats.changes.push({
+                                name: associate.name,
+                                from: lastWeekStatus,
+                                to: associate.status
+                            });
+                        }
+                    }
+
+                    if (associate.totalHours >= 680 && associate.totalHours < 720) {
+                        stats.within40++;
+                    }
+                });
+
+                return stats;
+            };
+
+            const getHighlightClass = (associate) => {
+                if (!lastWeekData[associate.name]) return '';
+                
+                const lastWeekHours = lastWeekData[associate.name].totalHours || 0;
+                
+                if (associate.totalHours >= 720 && lastWeekHours < 720) {
+                    return 'highlight-orange';
+                }
+                
+                if (associate.totalHours >= 680 && associate.totalHours < 720) {
+                    return 'highlight-yellow';
+                }
+                
+                return '';
+            };
+
+            const exportToExcel = () => {
+                const filtered = getFilteredAssociates()
+                    .filter(a => a.totalHours >= 480)
+                    .sort((a, b) => b.daysWorked - a.daysWorked);
+
+                const exportData = filtered.map(a => ({
+                    'Employee': a.name,
+                    'Days Worked': a.daysWorked,
+                    'Hours Worked': a.totalHours.toFixed(2),
+                    'Shift': a.shift || '',
+                    'Start Date': a.startDate || '',
+                    'ABC': a.abc ? a.abc.total : '',
+                    'Avg L5W': a.avg5Week.toFixed(2),
+                    'Status': a.status || ''
+                }));
+
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Crescent Core');
+
+                const range = XLSX.utils.decode_range(ws['!ref']);
+                for (let R = 1; R <= range.e.r; R++) {
+                    const associate = filtered[R - 1];
+                    if (associate) {
+                        const highlightClass = getHighlightClass(associate);
+                        if (highlightClass) {
+                            const color = highlightClass === 'highlight-orange' ? 'FFD7AA' : 'FEF08A';
+                            for (let C = range.s.c; C <= range.e.c; C++) {
+                                const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                                if (!ws[cellAddress]) continue;
+                                if (!ws[cellAddress].s) ws[cellAddress].s = {};
+                                ws[cellAddress].s.fill = { fgColor: { rgb: color } };
+                            }
+                        }
+                    }
+                }
+
+                const abcData = filtered
+                    .filter(a => a.abc && a.abc.details)
+                    .map(a => {
+                        const row = {
+                            'Employee': a.name,
+                            'Shift': a.shift || '',
+                            'Total ABC Score': a.abc.total
+                        };
+                        
+                        ABC_CATEGORIES.forEach(category => {
+                            row[category] = a.abc.details[category] || '';
+                        });
+                        
+                        return row;
+                    });
+
+                if (abcData.length > 0) {
+                    const wsABC = XLSX.utils.json_to_sheet(abcData);
+                    XLSX.utils.book_append_sheet(wb, wsABC, 'ABC Details');
+                }
+
+                const fileName = `Crescent_Core_Associate_List_WE_${weekEnding.replace(/\//g, '-')}.xlsx`;
+                XLSX.writeFile(wb, fileName);
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto"></div>
+                            <p className="mt-4 text-gray-600">Connecting to Firebase...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            const UploadView = () => {
+                const weekExists = availableWeeks.includes(weekEnding);
+                
+                return (
+                    <div className="max-w-4xl mx-auto p-6 space-y-6">
+                        <h2 className="text-2xl font-bold mb-6">Upload Weekly Files</h2>
+                        
+                        {availableWeeks.length > 0 && (
+                            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p className="font-medium text-blue-800">Historical Data Available</p>
+                                <p className="text-sm text-blue-700 mt-1">
+                                    You have {availableWeeks.length} week(s) of data stored. Use the dropdown in the navigation to view past weeks.
+                                </p>
+                                <p className="text-sm text-blue-700 mt-1">
+                                    Most recent: {availableWeeks[0]}
+                                </p>
+                            </div>
+                        )}
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Week Ending Date</label>
+                                <input
+                                    type="date"
+                                    value={weekEnding}
+                                    onChange={(e) => setWeekEnding(e.target.value)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                />
+                                {weekExists && (
+                                    <p className="text-orange-600 text-sm mt-1">
+                                        ⚠️ Data already exists for this week. Uploading will update the existing data.
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">DAWK File</label>
+                                    <input
+                                        type="file"
+                                        accept=".xls,.xlsx"
+                                        onChange={(e) => handleFileUpload('dawk', e)}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                    {uploadedFiles.dawk && (
+                                        <span className="text-green-600 text-sm">✓ {uploadedFiles.dawk.name}</span>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">LDST File</label>
+                                    <input
+                                        type="file"
+                                        accept=".xls,.xlsx"
+                                        onChange={(e) => handleFileUpload('ldst', e)}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                    {uploadedFiles.ldst && (
+                                        <span className="text-green-600 text-sm">✓ {uploadedFiles.ldst.name}</span>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">LD5W File</label>
+                                    <input
+                                        type="file"
+                                        accept=".xls,.xlsx"
+                                        onChange={(e) => handleFileUpload('ld5w', e)}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                    {uploadedFiles.ld5w && (
+                                        <span className="text-green-600 text-sm">✓ {uploadedFiles.ld5w.name}</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={processFiles}
+                                disabled={processing || !uploadedFiles.dawk || !uploadedFiles.ldst || !uploadedFiles.ld5w || !weekEnding}
+                                className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            >
+                                {processing ? 'Processing...' : weekExists ? 'Update Week Data' : 'Process Files'}
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            const AllAssociatesView = () => {
+                let over680 = Object.values(associates).filter(a => a.totalHours >= 680);
+                
+                if (sortConfig.key) {
+                    over680 = sortAssociates(over680, sortConfig.key);
+                } else {
+                    over680.sort((a, b) => b.totalHours - a.totalHours);
+                }
+
+                return (
+                    <div className="max-w-7xl mx-auto p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold">All Associates Over 680 Hours</h2>
+                            {selectedWeek && (
+                                <div className="text-sm bg-blue-100 text-blue-800 px-4 py-2 rounded-lg">
+                                    Viewing Week Ending: <strong>{selectedWeek}</strong>
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full bg-white border border-gray-300">
+                                <thead className="bg-gray-100">
+                                    <tr>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('name')}
+                                        >
+                                            Name{getSortIndicator('name')}
+                                        </th>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('daysWorked')}
+                                        >
+                                            Days{getSortIndicator('daysWorked')}
+                                        </th>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('totalHours')}
+                                        >
+                                            Total Hours{getSortIndicator('totalHours')}
+                                        </th>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('shift')}
+                                        >
+                                            Shift{getSortIndicator('shift')}
+                                        </th>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('startDate')}
+                                        >
+                                            Start Date{getSortIndicator('startDate')}
+                                        </th>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('avg5Week')}
+                                        >
+                                            Avg 5W{getSortIndicator('avg5Week')}
+                                        </th>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('abc')}
+                                        >
+                                            ABC{getSortIndicator('abc')}
+                                        </th>
+                                        <th 
+                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                            onClick={() => handleSort('status')}
+                                        >
+                                            Status{getSortIndicator('status')}
+                                        </th>
+                                        <th className="px-4 py-2 border">Notes</th>
+                                        <th className="px-4 py-2 border">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {over680.map(associate => (
+                                        <tr key={associate.name} className="hover:bg-gray-50">
+                                            <td className="px-4 py-2 border">{associate.name}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.daysWorked}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.totalHours.toFixed(2)}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.shift}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.startDate}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.avg5Week.toFixed(2)}</td>
+                                            <td className="px-4 py-2 border text-center">
+                                                {associate.abc ? associate.abc.total : '-'}
+                                            </td>
+                                            <td className="px-4 py-2 border">
+                                                <select
+                                                    value={associate.status || ''}
+                                                    onChange={(e) => updateAssociateStatus(associate.name, 'status', e.target.value)}
+                                                    className="w-full px-2 py-1 border rounded text-sm"
+                                                >
+                                                    {STATUS_OPTIONS.map(option => (
+                                                        <option key={option} value={option}>{option || '(none)'}</option>
+                                                    ))}
+                                                </select>
+                                            </td>
+                                            <td className="px-4 py-2 border">
+                                                <input
+                                                    type="text"
+                                                    value={associate.notes || ''}
+                                                    onChange={(e) => updateAssociateStatus(associate.name, 'notes', e.target.value)}
+                                                    className="w-full px-2 py-1 border rounded text-sm"
+                                                    placeholder="Add notes..."
+                                                />
+                                            </td>
+                                            <td className="px-4 py-2 border text-center">
+                                                <button
+                                                    onClick={() => setEditingABC(associate.name)}
+                                                    className="text-blue-600 hover:text-blue-800 text-sm"
+                                                >
+                                                    Edit ABC
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                );
+            };
+
+            const ABCReviewsView = () => {
+                const over680 = Object.values(associates).filter(a => a.totalHours >= 680)
+                    .sort((a, b) => b.totalHours - a.totalHours);
+
+                const filteredAssociates = over680.filter(a => 
+                    a.name.toLowerCase().includes(abcSearchTerm.toLowerCase())
+                );
+
+                return (
+                    <div className="max-w-6xl mx-auto p-6">
+                        <h2 className="text-2xl font-bold mb-6">ABC Reviews for Associates Over 680 Hours</h2>
+                        
+                        <div className="mb-6">
+                            <input
+                                type="text"
+                                placeholder="Search associates by name..."
+                                value={abcSearchTerm}
+                                onChange={(e) => setAbcSearchTerm(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            />
+                            <p className="text-sm text-gray-600 mt-2">
+                                Showing {filteredAssociates.length} of {over680.length} associates
+                            </p>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            {filteredAssociates.map(associate => (
+                                <div key={associate.name} className="border border-gray-300 rounded-lg p-4 bg-white">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <h3 className="font-bold text-lg">{associate.name}</h3>
+                                            <p className="text-sm text-gray-600">
+                                                {associate.totalHours.toFixed(2)} hours | Shift {associate.shift}
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => setEditingABC(associate.name)}
+                                            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                                        >
+                                            {associate.abc ? 'Update ABC' : 'Add ABC'}
+                                        </button>
+                                    </div>
+                                    {associate.abc && (
+                                        <div className="mt-2 p-3 bg-gray-50 rounded">
+                                            <p className="font-medium">ABC Score: {associate.abc.total} / 56</p>
+                                            {associate.abc.details && (
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2 text-sm">
+                                                    {ABC_CATEGORIES.map(category => (
+                                                        <div key={category}>
+                                                            {category}: {associate.abc.details[category] || '-'}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            const FilteredView = () => {
+                const filtered = getFilteredAssociates()
+                    .filter(a => a.totalHours >= 480)
+                    .sort((a, b) => b.daysWorked - a.daysWorked);
+
+                const stats = getSummaryStats();
+
+                return (
+                    <div className="max-w-7xl mx-auto p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold">Crescent Core Associates (480+ Hours)</h2>
+                            <div className="space-x-4">
+                                <button
+                                    onClick={exportToExcel}
+                                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 font-medium"
+                                >
+                                    Export to Excel
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mb-4 flex gap-4">
+                            <label className="flex items-center">
+                                <input
+                                    type="checkbox"
+                                    checked={filterStatus.showDelete}
+                                    onChange={(e) => setFilterStatus({...filterStatus, showDelete: e.target.checked})}
+                                    className="mr-2"
+                                />
+                                Show "Delete" status
+                            </label>
+                            <label className="flex items-center">
+                                <input
+                                    type="checkbox"
+                                    checked={filterStatus.showIndirect}
+                                    onChange={(e) => setFilterStatus({...filterStatus, showIndirect: e.target.checked})}
+                                    className="mr-2"
+                                />
+                                Show "Indirect" status
+                            </label>
+                        </div>
+
+                        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded">
+                            <p className="font-medium mb-2">Highlighting Legend:</p>
+                            <div className="space-y-1 text-sm">
+                                <div className="flex items-center">
+                                    <div className="w-6 h-6 highlight-orange border border-gray-300 mr-2"></div>
+                                    <span>Orange: New to Crescent Core this week (crossed 720 hours)</span>
+                                </div>
+                                <div className="flex items-center">
+                                    <div className="w-6 h-6 highlight-yellow border border-gray-300 mr-2"></div>
+                                    <span>Yellow: Between 680-720 hours (within 40 hours of threshold)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto mb-6">
+                            <table className="min-w-full bg-white border border-gray-300">
+                                <thead className="bg-gray-100">
+                                    <tr>
+                                        <th className="px-4 py-2 border">Employee</th>
+                                        <th className="px-4 py-2 border">Days Worked</th>
+                                        <th className="px-4 py-2 border">Hours Worked</th>
+                                        <th className="px-4 py-2 border">Shift</th>
+                                        <th className="px-4 py-2 border">Start Date</th>
+                                        <th className="px-4 py-2 border">ABC</th>
+                                        <th className="px-4 py-2 border">Avg L5W</th>
+                                        <th className="px-4 py-2 border">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filtered.map(associate => (
+                                        <tr key={associate.name} className={`hover:opacity-80 ${getHighlightClass(associate)}`}>
+                                            <td className="px-4 py-2 border">{associate.name}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.daysWorked}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.totalHours.toFixed(2)}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.shift}</td>
+                                            <td className="px-4 py-2 border text-center">{associate.startDate}</td>
+                                            <td className="px-4 py-2 border text-center">
+                                                {associate.abc ? associate.abc.total : ''}
+                                            </td>
+                                            <td className="px-4 py-2 border text-center">{associate.avg5Week.toFixed(2)}</td>
+                                            <td className="px-4 py-2 border">{associate.status}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="bg-white border border-gray-300 rounded-lg p-6">
+                            <h3 className="text-xl font-bold mb-4">Summary Statistics</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div className="p-4 bg-blue-50 rounded">
+                                    <p className="text-sm text-gray-600">Total Core Associates</p>
+                                    <p className="text-3xl font-bold text-blue-600">{stats.total}</p>
+                                </div>
+                                <div className="p-4 bg-green-50 rounded">
+                                    <p className="text-sm text-gray-600">1st Shift Core Associates</p>
+                                    <p className="text-3xl font-bold text-green-600">{stats.shift1}</p>
+                                </div>
+                                <div className="p-4 bg-purple-50 rounded">
+                                    <p className="text-sm text-gray-600">2nd Shift Core Associates</p>
+                                    <p className="text-3xl font-bold text-purple-600">{stats.shift2}</p>
+                                </div>
+                                <div className="p-4 bg-orange-50 rounded">
+                                    <p className="text-sm text-gray-600">New Core Associates</p>
+                                    <p className="text-3xl font-bold text-orange-600">{stats.newCore}</p>
+                                </div>
+                                <div className="p-4 bg-yellow-50 rounded">
+                                    <p className="text-sm text-gray-600">Within 40 Hours</p>
+                                    <p className="text-3xl font-bold text-yellow-600">{stats.within40}</p>
+                                </div>
+                            </div>
+
+                            {stats.changes.length > 0 && (
+                                <div className="mt-6">
+                                    <h4 className="font-bold mb-2">Status Changes from Last Week:</h4>
+                                    <div className="space-y-2">
+                                        {stats.changes.map((change, idx) => (
+                                            <div key={idx} className="p-2 bg-gray-50 rounded text-sm">
+                                                <span className="font-medium">{change.name}:</span> {change.from || '(none)'} → {change.to || '(none)'}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
+
+            const ABCEditModal = () => {
+                if (!editingABC) return null;
+
+                const associate = associates[editingABC];
+                
+                const [scores, setScores] = useState(() => {
+                    const initialScores = {};
+                    ABC_CATEGORIES.forEach(category => {
+                        initialScores[category] = (associate.abc?.details && associate.abc.details[category]) || '';
+                    });
+                    return initialScores;
+                });
+
+                const calculateTotal = () => {
+                    return ABC_CATEGORIES.reduce((sum, category) => {
+                        const score = parseInt(scores[category]) || 0;
+                        return sum + score;
+                    }, 0);
+                };
+
+                const handleScoreChange = (category, value) => {
+                    const numValue = parseInt(value) || '';
+                    if (numValue === '' || (numValue >= 1 && numValue <= 4)) {
+                        setScores(prev => ({ ...prev, [category]: numValue }));
+                    }
+                };
+
+                const handleSave = () => {
+                    const abcData = {
+                        details: scores,
+                        total: calculateTotal()
+                    };
+                    updateAssociateABC(editingABC, abcData);
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                            <h3 className="text-xl font-bold mb-4">Edit ABC Review: {editingABC}</h3>
+                            
+                            <div className="mb-4 p-4 bg-blue-50 rounded">
+                                <p className="text-sm text-gray-700">
+                                    Score each category from <strong>1 (Poor)</strong> to <strong>4 (Excellent)</strong>
+                                </p>
+                                <p className="text-sm text-gray-700 mt-1">
+                                    Maximum total score: 56 points (14 categories × 4 points)
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {ABC_CATEGORIES.map((category, index) => (
+                                    <div key={category} className="flex items-center space-x-3 p-3 bg-gray-50 rounded">
+                                        <div className="flex-1">
+                                            <label className="block text-sm font-medium">
+                                                {index + 1}. {category}
+                                            </label>
+                                        </div>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="4"
+                                            value={scores[category]}
+                                            onChange={(e) => handleScoreChange(category, e.target.value)}
+                                            className="w-16 px-3 py-2 border border-gray-300 rounded text-center font-medium"
+                                            placeholder="1-4"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="mt-6 p-4 bg-green-50 rounded border-2 border-green-300">
+                                <div className="flex justify-between items-center">
+                                    <p className="text-lg font-bold">Total ABC Score:</p>
+                                    <p className="text-3xl font-bold text-green-600">{calculateTotal()} / 56</p>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end space-x-3 mt-6">
+                                <button
+                                    onClick={() => {
+                                        setEditingABC(null);
+                                        setScores({});
+                                    }}
+                                    className="px-6 py-2 border border-gray-300 rounded hover:bg-gray-100"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSave}
+                                    className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                >
+                                    Save ABC Review
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    <nav className="bg-blue-600 text-white p-4">
+                        <div className="max-w-7xl mx-auto flex justify-between items-center">
+                            <h1 className="text-2xl font-bold">Crescent Core Hours Tracker</h1>
+                            <div className="flex items-center space-x-4">
+                                <div className="flex items-center space-x-2">
+                                    <div className={`h-3 w-3 rounded-full ${syncStatus === 'Connected' ? 'bg-green-400' : syncStatus === 'Syncing...' ? 'bg-yellow-400' : 'bg-red-400'}`}></div>
+                                    <span className="text-sm">{syncStatus}</span>
+                                </div>
+                                {availableWeeks.length > 0 && (
+                                    <div className="flex items-center space-x-2">
+                                        <label className="text-sm">Week Ending:</label>
+                                        <select
+                                            value={selectedWeek}
+                                            onChange={(e) => setSelectedWeek(e.target.value)}
+                                            className="px-3 py-1 rounded text-gray-800 text-sm"
+                                        >
+                                            {availableWeeks.map(week => (
+                                                <option key={week} value={week}>{week}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                                <button
+                                    onClick={() => setActiveView('upload')}
+                                    className={`px-4 py-2 rounded ${activeView === 'upload' ? 'bg-blue-800' : 'hover:bg-blue-700'}`}
+                                >
+                                    Upload
+                                </button>
+                                <button
+                                    onClick={() => setActiveView('allAssociates')}
+                                    className={`px-4 py-2 rounded ${activeView === 'allAssociates' ? 'bg-blue-800' : 'hover:bg-blue-700'}`}
+                                    disabled={Object.keys(associates).length === 0}
+                                >
+                                    All Associates
+                                </button>
+                                <button
+                                    onClick={() => setActiveView('abcReviews')}
+                                    className={`px-4 py-2 rounded ${activeView === 'abcReviews' ? 'bg-blue-800' : 'hover:bg-blue-700'}`}
+                                    disabled={Object.keys(associates).length === 0}
+                                >
+                                    ABC Reviews
+                                </button>
+                                <button
+                                    onClick={() => setActiveView('filtered')}
+                                    className={`px-4 py-2 rounded ${activeView === 'filtered' ? 'bg-blue-800' : 'hover:bg-blue-700'}`}
+                                    disabled={Object.keys(associates).length === 0}
+                                >
+                                    Export View
+                                </button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <main className="py-8">
+                        {activeView === 'upload' && <UploadView />}
+                        {activeView === 'allAssociates' && <AllAssociatesView />}
+                        {activeView === 'abcReviews' && <ABCReviewsView />}
+                        {activeView === 'filtered' && <FilteredView />}
+                    </main>
+
+                    <ABCEditModal />
+                </div>
+            );
+        }
+
+        ReactDOM.render(<CrescentHoursTracker />, document.getElementById('root'));
+    </script>
+</body>
+</html>
