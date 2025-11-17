@@ -117,6 +117,21 @@
             return desanitized;
         };
 
+        // Memoized search input component to prevent focus loss
+        const SearchInput = React.memo(({ id, value, onChange, placeholder }) => {
+            return (
+                <input
+                    id={id}
+                    type="text"
+                    placeholder={placeholder}
+                    value={value}
+                    onChange={onChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    autoComplete="off"
+                />
+            );
+        });
+
         function CrescentHoursTracker() {
             const [associates, setAssociates] = useState({});
             const [weekEnding, setWeekEnding] = useState('');
@@ -133,7 +148,20 @@
             const [abcSearchTerm, setAbcSearchTerm] = useState('');
             const [allAssociatesSearchTerm, setAllAssociatesSearchTerm] = useState('');
             const [abcShowDelete, setAbcShowDelete] = useState(true);
-            
+
+            // Stable callback handlers to prevent re-creation
+            const handleAbcSearchChange = useCallback((e) => {
+                setAbcSearchTerm(e.target.value);
+            }, []);
+
+            const handleAllAssociatesSearchChange = useCallback((e) => {
+                setAllAssociatesSearchTerm(e.target.value);
+            }, []);
+
+            const handleAbcShowDeleteChange = useCallback((e) => {
+                setAbcShowDelete(e.target.checked);
+            }, []);
+
             // Firebase configuration state
             const [firebaseConfig, setFirebaseConfig] = useState(null);
             const [firebaseInitialized, setFirebaseInitialized] = useState(false);
@@ -784,14 +812,11 @@
                         </div>
 
                         <div className="mb-6">
-                            <input
+                            <SearchInput
                                 id="all-associates-search-input"
-                                type="text"
-                                placeholder="Search associates by name..."
                                 value={allAssociatesSearchTerm}
-                                onChange={(e) => setAllAssociatesSearchTerm(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                autoComplete="off"
+                                onChange={handleAllAssociatesSearchChange}
+                                placeholder="Search associates by name..."
                             />
                             <p className="text-sm text-gray-600 mt-2">
                                 Showing {over680.length} associate{over680.length !== 1 ? 's' : ''}
@@ -932,14 +957,11 @@
                         <h2 className="text-2xl font-bold mb-6">ABC Reviews for Associates Over 680 Hours</h2>
 
                         <div className="mb-6">
-                            <input
+                            <SearchInput
                                 id="abc-search-input"
-                                type="text"
-                                placeholder="Search associates by name..."
                                 value={abcSearchTerm}
-                                onChange={(e) => setAbcSearchTerm(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                autoComplete="off"
+                                onChange={handleAbcSearchChange}
+                                placeholder="Search associates by name..."
                             />
                             <div className="flex items-center justify-between mt-2">
                                 <p className="text-sm text-gray-600">
@@ -949,7 +971,7 @@
                                     <input
                                         type="checkbox"
                                         checked={abcShowDelete}
-                                        onChange={(e) => setAbcShowDelete(e.target.checked)}
+                                        onChange={handleAbcShowDeleteChange}
                                         className="mr-2"
                                     />
                                     Show "Delete" status
