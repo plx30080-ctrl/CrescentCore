@@ -39,7 +39,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback } = React;
+        const { useState, useEffect, useCallback, useMemo } = React;
 
         // Status options for dropdown
         const STATUS_OPTIONS = [
@@ -131,6 +131,8 @@
             const [filterStatus, setFilterStatus] = useState({ showDelete: false, showIndirect: false });
             const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
             const [abcSearchTerm, setAbcSearchTerm] = useState('');
+            const [allAssociatesSearchTerm, setAllAssociatesSearchTerm] = useState('');
+            const [abcShowDelete, setAbcShowDelete] = useState(true);
             
             // Firebase configuration state
             const [firebaseConfig, setFirebaseConfig] = useState(null);
@@ -753,13 +755,22 @@
             };
 
             const AllAssociatesView = () => {
-                let over680 = Object.values(associates).filter(a => a.totalHours >= 680);
-                
-                if (sortConfig.key) {
-                    over680 = sortAssociates(over680, sortConfig.key);
-                } else {
-                    over680.sort((a, b) => b.totalHours - a.totalHours);
-                }
+                const over680 = useMemo(() => {
+                    let filtered = Object.values(associates).filter(a => a.totalHours >= 680);
+
+                    // Apply search filter
+                    if (allAssociatesSearchTerm) {
+                        filtered = filtered.filter(a =>
+                            a.name.toLowerCase().includes(allAssociatesSearchTerm.toLowerCase())
+                        );
+                    }
+
+                    if (sortConfig.key) {
+                        return sortAssociates(filtered, sortConfig.key);
+                    } else {
+                        return filtered.sort((a, b) => b.totalHours - a.totalHours);
+                    }
+                }, [associates, allAssociatesSearchTerm, sortConfig]);
 
                 return (
                     <div className="max-w-7xl mx-auto p-6">
@@ -771,7 +782,22 @@
                                 </div>
                             )}
                         </div>
-                        
+
+                        <div className="mb-6">
+                            <input
+                                id="all-associates-search-input"
+                                type="text"
+                                placeholder="Search associates by name..."
+                                value={allAssociatesSearchTerm}
+                                onChange={(e) => setAllAssociatesSearchTerm(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                autoComplete="off"
+                            />
+                            <p className="text-sm text-gray-600 mt-2">
+                                Showing {over680.length} associate{over680.length !== 1 ? 's' : ''}
+                            </p>
+                        </div>
+
                         <div className="overflow-x-auto">
                             <table className="min-w-full bg-white border border-gray-300">
                                 <thead className="bg-gray-100">
@@ -878,28 +904,57 @@
             };
 
             const ABCReviewsView = () => {
-                const over680 = Object.values(associates).filter(a => a.totalHours >= 680)
-                    .sort((a, b) => b.totalHours - a.totalHours);
+                const filteredAssociates = useMemo(() => {
+                    let over680 = Object.values(associates).filter(a => a.totalHours >= 680);
 
-                const filteredAssociates = over680.filter(a => 
-                    a.name.toLowerCase().includes(abcSearchTerm.toLowerCase())
-                );
+                    // Filter out Delete status if checkbox is unchecked
+                    if (!abcShowDelete) {
+                        over680 = over680.filter(a => a.status !== 'Delete');
+                    }
+
+                    over680.sort((a, b) => b.totalHours - a.totalHours);
+
+                    return over680.filter(a =>
+                        a.name.toLowerCase().includes(abcSearchTerm.toLowerCase())
+                    );
+                }, [associates, abcShowDelete, abcSearchTerm]);
+
+                const over680Count = useMemo(() => {
+                    let count = Object.values(associates).filter(a => a.totalHours >= 680);
+                    if (!abcShowDelete) {
+                        count = count.filter(a => a.status !== 'Delete');
+                    }
+                    return count.length;
+                }, [associates, abcShowDelete]);
 
                 return (
                     <div className="max-w-6xl mx-auto p-6">
                         <h2 className="text-2xl font-bold mb-6">ABC Reviews for Associates Over 680 Hours</h2>
-                        
+
                         <div className="mb-6">
                             <input
+                                id="abc-search-input"
                                 type="text"
                                 placeholder="Search associates by name..."
                                 value={abcSearchTerm}
                                 onChange={(e) => setAbcSearchTerm(e.target.value)}
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                autoComplete="off"
                             />
-                            <p className="text-sm text-gray-600 mt-2">
-                                Showing {filteredAssociates.length} of {over680.length} associates
-                            </p>
+                            <div className="flex items-center justify-between mt-2">
+                                <p className="text-sm text-gray-600">
+                                    Showing {filteredAssociates.length} of {over680Count} associates
+                                </p>
+                                <label className="flex items-center text-sm">
+                                    <input
+                                        type="checkbox"
+                                        checked={abcShowDelete}
+                                        onChange={(e) => setAbcShowDelete(e.target.checked)}
+                                        className="mr-2"
+                                    />
+                                    Show "Delete" status
+                                </label>
+                            </div>
                         </div>
                         
                         <div className="space-y-4">
