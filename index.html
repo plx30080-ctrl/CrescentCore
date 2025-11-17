@@ -117,18 +117,19 @@
             return desanitized;
         };
 
-        // Memoized search input component with focus restoration to prevent focus loss
-        const SearchInput = React.memo(({ id, value, onChange, placeholder }) => {
+        // SearchInput component - uses defaultValue to prevent focus loss
+        function SearchInput({ id, value, onChange, placeholder }) {
             const inputRef = React.useRef(null);
-            const { useEffect } = React;
 
-            useEffect(() => {
-                // Restore focus if this input was the active element before re-render
-                const activeId = document.activeElement?.id;
-                if (activeId === id && inputRef.current && document.activeElement !== inputRef.current) {
-                    inputRef.current.focus();
+            // Sync the input value without losing focus
+            React.useEffect(() => {
+                if (inputRef.current && inputRef.current.value !== value) {
+                    const start = inputRef.current.selectionStart;
+                    const end = inputRef.current.selectionEnd;
+                    inputRef.current.value = value;
+                    inputRef.current.setSelectionRange(start, end);
                 }
-            });
+            }, [value]);
 
             return (
                 <input
@@ -136,13 +137,13 @@
                     id={id}
                     type="text"
                     placeholder={placeholder}
-                    value={value}
+                    defaultValue={value}
                     onChange={onChange}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     autoComplete="off"
                 />
             );
-        });
+        }
 
         function CrescentHoursTracker() {
             const [associates, setAssociates] = useState({});
