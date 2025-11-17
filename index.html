@@ -117,10 +117,22 @@
             return desanitized;
         };
 
-        // Memoized search input component to prevent focus loss
+        // Memoized search input component with focus restoration to prevent focus loss
         const SearchInput = React.memo(({ id, value, onChange, placeholder }) => {
+            const inputRef = React.useRef(null);
+            const { useEffect } = React;
+
+            useEffect(() => {
+                // Restore focus if this input was the active element before re-render
+                const activeId = document.activeElement?.id;
+                if (activeId === id && inputRef.current && document.activeElement !== inputRef.current) {
+                    inputRef.current.focus();
+                }
+            });
+
             return (
                 <input
+                    ref={inputRef}
                     id={id}
                     type="text"
                     placeholder={placeholder}
