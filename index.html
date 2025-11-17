@@ -117,10 +117,22 @@
             return desanitized;
         };
 
-        // Memoized search input component to prevent focus loss
+        // Memoized search input component with focus restoration to prevent focus loss
         const SearchInput = React.memo(({ id, value, onChange, placeholder }) => {
+            const inputRef = React.useRef(null);
+            const { useEffect } = React;
+
+            useEffect(() => {
+                // Restore focus if this input was the active element before re-render
+                const activeId = document.activeElement?.id;
+                if (activeId === id && inputRef.current && document.activeElement !== inputRef.current) {
+                    inputRef.current.focus();
+                }
+            });
+
             return (
                 <input
+                    ref={inputRef}
                     id={id}
                     type="text"
                     placeholder={placeholder}
@@ -782,8 +794,8 @@
                 );
             };
 
-            const AllAssociatesView = useMemo(() => {
-                const over680 = (() => {
+            const AllAssociatesView = () => {
+                const over680 = useMemo(() => {
                     let filtered = Object.values(associates).filter(a => a.totalHours >= 680);
 
                     // Apply search filter
@@ -798,7 +810,7 @@
                     } else {
                         return filtered.sort((a, b) => b.totalHours - a.totalHours);
                     }
-                })();
+                }, [associates, allAssociatesSearchTerm, sortConfig]);
 
                 return (
                     <div className="max-w-7xl mx-auto p-6">
@@ -926,10 +938,10 @@
                         </div>
                     </div>
                 );
-            }, [associates, allAssociatesSearchTerm, sortConfig, selectedWeek, handleAllAssociatesSearchChange, handleSort, getSortIndicator, updateAssociateStatus, setEditingABC]);
+            };
 
-            const ABCReviewsView = useMemo(() => {
-                const filteredAssociates = (() => {
+            const ABCReviewsView = () => {
+                const filteredAssociates = useMemo(() => {
                     let over680 = Object.values(associates).filter(a => a.totalHours >= 680);
 
                     // Filter out Delete status if checkbox is unchecked
@@ -942,15 +954,15 @@
                     return over680.filter(a =>
                         a.name.toLowerCase().includes(abcSearchTerm.toLowerCase())
                     );
-                })();
+                }, [associates, abcShowDelete, abcSearchTerm]);
 
-                const over680Count = (() => {
+                const over680Count = useMemo(() => {
                     let count = Object.values(associates).filter(a => a.totalHours >= 680);
                     if (!abcShowDelete) {
                         count = count.filter(a => a.status !== 'Delete');
                     }
                     return count.length;
-                })();
+                }, [associates, abcShowDelete]);
 
                 return (
                     <div className="max-w-6xl mx-auto p-6">
@@ -1015,7 +1027,7 @@
                         </div>
                     </div>
                 );
-            }, [associates, abcShowDelete, abcSearchTerm, handleAbcSearchChange, handleAbcShowDeleteChange, setEditingABC]);
+            };
 
             const FilteredView = () => {
                 const filtered = getFilteredAssociates()
@@ -1304,8 +1316,8 @@
 
                     <main className="py-8">
                         {activeView === 'upload' && <UploadView />}
-                        {activeView === 'allAssociates' && AllAssociatesView}
-                        {activeView === 'abcReviews' && ABCReviewsView}
+                        {activeView === 'allAssociates' && <AllAssociatesView />}
+                        {activeView === 'abcReviews' && <ABCReviewsView />}
                         {activeView === 'filtered' && <FilteredView />}
                     </main>
 
