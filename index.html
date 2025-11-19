@@ -117,33 +117,18 @@
             return desanitized;
         };
 
-        // SearchInput component - uses defaultValue to prevent focus loss
-        function SearchInput({ id, value, onChange, placeholder }) {
-            const inputRef = React.useRef(null);
-
-            // Sync the input value without losing focus
-            React.useEffect(() => {
-                if (inputRef.current && inputRef.current.value !== value) {
-                    const start = inputRef.current.selectionStart;
-                    const end = inputRef.current.selectionEnd;
-                    inputRef.current.value = value;
-                    inputRef.current.setSelectionRange(start, end);
-                }
-            }, [value]);
-
-            return (
-                <input
-                    ref={inputRef}
-                    id={id}
-                    type="text"
-                    placeholder={placeholder}
-                    defaultValue={value}
-                    onChange={onChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    autoComplete="off"
-                />
-            );
-        }
+        // Simple controlled input - React.memo prevents recreation
+        const SearchInput = React.memo(({ id, value, onChange, placeholder }) => (
+            <input
+                id={id}
+                type="text"
+                placeholder={placeholder}
+                value={value}
+                onChange={onChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                autoComplete="off"
+            />
+        ));
 
         function CrescentHoursTracker() {
             const [associates, setAssociates] = useState({});
@@ -195,7 +180,7 @@
                     appId: "1:404886435461:web:a0568f745f9b15a6875bec",
                     measurementId: "G-S8XX0K6PCE"
                 };
-                
+
                 initializeFirebase(config);
             }, []);
 
@@ -826,6 +811,7 @@
 
                         <div className="mb-6">
                             <SearchInput
+                                key="all-associates-search"
                                 id="all-associates-search-input"
                                 value={allAssociatesSearchTerm}
                                 onChange={handleAllAssociatesSearchChange}
@@ -971,6 +957,7 @@
 
                         <div className="mb-6">
                             <SearchInput
+                                key="abc-search"
                                 id="abc-search-input"
                                 value={abcSearchTerm}
                                 onChange={handleAbcSearchChange}
