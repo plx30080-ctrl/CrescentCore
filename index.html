@@ -130,6 +130,288 @@
             />
         ));
 
+        // Extract AllAssociatesView outside to prevent recreation
+        const AllAssociatesView = React.memo(({
+            associates,
+            allAssociatesSearchTerm,
+            handleAllAssociatesSearchChange,
+            sortConfig,
+            selectedWeek,
+            handleSort,
+            getSortIndicator,
+            updateAssociateStatus,
+            setEditingABC,
+            STATUS_OPTIONS
+        }) => {
+            const over680 = useMemo(() => {
+                let filtered = Object.values(associates).filter(a => a.totalHours >= 680);
+
+                // Apply search filter
+                if (allAssociatesSearchTerm) {
+                    filtered = filtered.filter(a =>
+                        a.name.toLowerCase().includes(allAssociatesSearchTerm.toLowerCase())
+                    );
+                }
+
+                const sortAssociates = (data, key) => {
+                    if (!key) return data;
+                    const sorted = [...data].sort((a, b) => {
+                        let aVal = a[key];
+                        let bVal = b[key];
+                        if (key === 'abc') {
+                            aVal = a.abc ? a.abc.total : 0;
+                            bVal = b.abc ? b.abc.total : 0;
+                        }
+                        if (aVal == null) aVal = '';
+                        if (bVal == null) bVal = '';
+                        if (typeof aVal === 'string') {
+                            return sortConfig.direction === 'asc'
+                                ? aVal.localeCompare(bVal)
+                                : bVal.localeCompare(aVal);
+                        } else {
+                            return sortConfig.direction === 'asc'
+                                ? aVal - bVal
+                                : bVal - aVal;
+                        }
+                    });
+                    return sorted;
+                };
+
+                if (sortConfig.key) {
+                    return sortAssociates(filtered, sortConfig.key);
+                } else {
+                    return filtered.sort((a, b) => b.totalHours - a.totalHours);
+                }
+            }, [associates, allAssociatesSearchTerm, sortConfig]);
+
+            return (
+                <div className="max-w-7xl mx-auto p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold">All Associates Over 680 Hours</h2>
+                        {selectedWeek && (
+                            <div className="text-sm bg-blue-100 text-blue-800 px-4 py-2 rounded-lg">
+                                Viewing Week Ending: <strong>{selectedWeek}</strong>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="mb-6">
+                        <SearchInput
+                            key="all-associates-search"
+                            id="all-associates-search-input"
+                            value={allAssociatesSearchTerm}
+                            onChange={handleAllAssociatesSearchChange}
+                            placeholder="Search associates by name..."
+                        />
+                        <p className="text-sm text-gray-600 mt-2">
+                            Showing {over680.length} associate{over680.length !== 1 ? 's' : ''}
+                        </p>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full bg-white border border-gray-300">
+                            <thead className="bg-gray-100">
+                                <tr>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('name')}
+                                    >
+                                        Name{getSortIndicator('name')}
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('daysWorked')}
+                                    >
+                                        Days{getSortIndicator('daysWorked')}
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('totalHours')}
+                                    >
+                                        Total Hours{getSortIndicator('totalHours')}
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('shift')}
+                                    >
+                                        Shift{getSortIndicator('shift')}
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('startDate')}
+                                    >
+                                        Start Date{getSortIndicator('startDate')}
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('avg5Week')}
+                                    >
+                                        Avg 5W{getSortIndicator('avg5Week')}
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('abc')}
+                                    >
+                                        ABC{getSortIndicator('abc')}
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
+                                        onClick={() => handleSort('status')}
+                                    >
+                                        Status{getSortIndicator('status')}
+                                    </th>
+                                    <th className="px-4 py-2 border">Notes</th>
+                                    <th className="px-4 py-2 border">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {over680.map(associate => (
+                                    <tr key={associate.name} className="hover:bg-gray-50">
+                                        <td className="px-4 py-2 border">{associate.name}</td>
+                                        <td className="px-4 py-2 border text-center">{associate.daysWorked}</td>
+                                        <td className="px-4 py-2 border text-center">{associate.totalHours.toFixed(2)}</td>
+                                        <td className="px-4 py-2 border text-center">{associate.shift}</td>
+                                        <td className="px-4 py-2 border text-center">{associate.startDate}</td>
+                                        <td className="px-4 py-2 border text-center">{associate.avg5Week.toFixed(2)}</td>
+                                        <td className="px-4 py-2 border text-center">
+                                            {associate.abc ? associate.abc.total : '-'}
+                                        </td>
+                                        <td className="px-4 py-2 border">
+                                            <select
+                                                value={associate.status || ''}
+                                                onChange={(e) => updateAssociateStatus(associate.name, 'status', e.target.value)}
+                                                className="w-full px-2 py-1 border rounded text-sm"
+                                            >
+                                                {STATUS_OPTIONS.map(option => (
+                                                    <option key={option} value={option}>{option || '(none)'}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                        <td className="px-4 py-2 border">
+                                            <input
+                                                type="text"
+                                                value={associate.notes || ''}
+                                                onChange={(e) => updateAssociateStatus(associate.name, 'notes', e.target.value)}
+                                                className="w-full px-2 py-1 border rounded text-sm"
+                                                placeholder="Add notes..."
+                                            />
+                                        </td>
+                                        <td className="px-4 py-2 border text-center">
+                                            <button
+                                                onClick={() => setEditingABC(associate.name)}
+                                                className="text-blue-600 hover:text-blue-800 text-sm"
+                                            >
+                                                Edit ABC
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        });
+
+        // Extract ABCReviewsView outside to prevent recreation
+        const ABCReviewsView = React.memo(({
+            associates,
+            abcSearchTerm,
+            handleAbcSearchChange,
+            abcShowDelete,
+            handleAbcShowDeleteChange,
+            setEditingABC,
+            ABC_CATEGORIES
+        }) => {
+            const filteredAssociates = useMemo(() => {
+                let over680 = Object.values(associates).filter(a => a.totalHours >= 680);
+
+                // Filter out Delete status if checkbox is unchecked
+                if (!abcShowDelete) {
+                    over680 = over680.filter(a => a.status !== 'Delete');
+                }
+
+                over680.sort((a, b) => b.totalHours - a.totalHours);
+
+                return over680.filter(a =>
+                    a.name.toLowerCase().includes(abcSearchTerm.toLowerCase())
+                );
+            }, [associates, abcShowDelete, abcSearchTerm]);
+
+            const over680Count = useMemo(() => {
+                let count = Object.values(associates).filter(a => a.totalHours >= 680);
+                if (!abcShowDelete) {
+                    count = count.filter(a => a.status !== 'Delete');
+                }
+                return count.length;
+            }, [associates, abcShowDelete]);
+
+            return (
+                <div className="max-w-6xl mx-auto p-6">
+                    <h2 className="text-2xl font-bold mb-6">ABC Reviews for Associates Over 680 Hours</h2>
+
+                    <div className="mb-6">
+                        <SearchInput
+                            key="abc-search"
+                            id="abc-search-input"
+                            value={abcSearchTerm}
+                            onChange={handleAbcSearchChange}
+                            placeholder="Search associates by name..."
+                        />
+                        <div className="flex items-center justify-between mt-2">
+                            <p className="text-sm text-gray-600">
+                                Showing {filteredAssociates.length} of {over680Count} associates
+                            </p>
+                            <label className="flex items-center text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={abcShowDelete}
+                                    onChange={handleAbcShowDeleteChange}
+                                    className="mr-2"
+                                />
+                                Show "Delete" status
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        {filteredAssociates.map(associate => (
+                            <div key={associate.name} className="border border-gray-300 rounded-lg p-4 bg-white">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div>
+                                        <h3 className="font-bold text-lg">{associate.name}</h3>
+                                        <p className="text-sm text-gray-600">
+                                            {associate.totalHours.toFixed(2)} hours | Shift {associate.shift}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => setEditingABC(associate.name)}
+                                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                                    >
+                                        {associate.abc ? 'Update ABC' : 'Add ABC'}
+                                    </button>
+                                </div>
+                                {associate.abc && (
+                                    <div className="mt-2 p-3 bg-gray-50 rounded">
+                                        <p className="font-medium">ABC Score: {associate.abc.total} / 56</p>
+                                        {associate.abc.details && (
+                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2 text-sm">
+                                                {ABC_CATEGORIES.map(category => (
+                                                    <div key={category}>
+                                                        {category}: {associate.abc.details[category] || '-'}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        });
+
         function CrescentHoursTracker() {
             const [associates, setAssociates] = useState({});
             const [weekEnding, setWeekEnding] = useState('');
@@ -780,243 +1062,6 @@
                 );
             };
 
-            const AllAssociatesView = () => {
-                const over680 = useMemo(() => {
-                    let filtered = Object.values(associates).filter(a => a.totalHours >= 680);
-
-                    // Apply search filter
-                    if (allAssociatesSearchTerm) {
-                        filtered = filtered.filter(a =>
-                            a.name.toLowerCase().includes(allAssociatesSearchTerm.toLowerCase())
-                        );
-                    }
-
-                    if (sortConfig.key) {
-                        return sortAssociates(filtered, sortConfig.key);
-                    } else {
-                        return filtered.sort((a, b) => b.totalHours - a.totalHours);
-                    }
-                }, [associates, allAssociatesSearchTerm, sortConfig]);
-
-                return (
-                    <div className="max-w-7xl mx-auto p-6">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-2xl font-bold">All Associates Over 680 Hours</h2>
-                            {selectedWeek && (
-                                <div className="text-sm bg-blue-100 text-blue-800 px-4 py-2 rounded-lg">
-                                    Viewing Week Ending: <strong>{selectedWeek}</strong>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="mb-6">
-                            <SearchInput
-                                key="all-associates-search"
-                                id="all-associates-search-input"
-                                value={allAssociatesSearchTerm}
-                                onChange={handleAllAssociatesSearchChange}
-                                placeholder="Search associates by name..."
-                            />
-                            <p className="text-sm text-gray-600 mt-2">
-                                Showing {over680.length} associate{over680.length !== 1 ? 's' : ''}
-                            </p>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full bg-white border border-gray-300">
-                                <thead className="bg-gray-100">
-                                    <tr>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('name')}
-                                        >
-                                            Name{getSortIndicator('name')}
-                                        </th>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('daysWorked')}
-                                        >
-                                            Days{getSortIndicator('daysWorked')}
-                                        </th>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('totalHours')}
-                                        >
-                                            Total Hours{getSortIndicator('totalHours')}
-                                        </th>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('shift')}
-                                        >
-                                            Shift{getSortIndicator('shift')}
-                                        </th>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('startDate')}
-                                        >
-                                            Start Date{getSortIndicator('startDate')}
-                                        </th>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('avg5Week')}
-                                        >
-                                            Avg 5W{getSortIndicator('avg5Week')}
-                                        </th>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('abc')}
-                                        >
-                                            ABC{getSortIndicator('abc')}
-                                        </th>
-                                        <th 
-                                            className="px-4 py-2 border cursor-pointer hover:bg-gray-200"
-                                            onClick={() => handleSort('status')}
-                                        >
-                                            Status{getSortIndicator('status')}
-                                        </th>
-                                        <th className="px-4 py-2 border">Notes</th>
-                                        <th className="px-4 py-2 border">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {over680.map(associate => (
-                                        <tr key={associate.name} className="hover:bg-gray-50">
-                                            <td className="px-4 py-2 border">{associate.name}</td>
-                                            <td className="px-4 py-2 border text-center">{associate.daysWorked}</td>
-                                            <td className="px-4 py-2 border text-center">{associate.totalHours.toFixed(2)}</td>
-                                            <td className="px-4 py-2 border text-center">{associate.shift}</td>
-                                            <td className="px-4 py-2 border text-center">{associate.startDate}</td>
-                                            <td className="px-4 py-2 border text-center">{associate.avg5Week.toFixed(2)}</td>
-                                            <td className="px-4 py-2 border text-center">
-                                                {associate.abc ? associate.abc.total : '-'}
-                                            </td>
-                                            <td className="px-4 py-2 border">
-                                                <select
-                                                    value={associate.status || ''}
-                                                    onChange={(e) => updateAssociateStatus(associate.name, 'status', e.target.value)}
-                                                    className="w-full px-2 py-1 border rounded text-sm"
-                                                >
-                                                    {STATUS_OPTIONS.map(option => (
-                                                        <option key={option} value={option}>{option || '(none)'}</option>
-                                                    ))}
-                                                </select>
-                                            </td>
-                                            <td className="px-4 py-2 border">
-                                                <input
-                                                    type="text"
-                                                    value={associate.notes || ''}
-                                                    onChange={(e) => updateAssociateStatus(associate.name, 'notes', e.target.value)}
-                                                    className="w-full px-2 py-1 border rounded text-sm"
-                                                    placeholder="Add notes..."
-                                                />
-                                            </td>
-                                            <td className="px-4 py-2 border text-center">
-                                                <button
-                                                    onClick={() => setEditingABC(associate.name)}
-                                                    className="text-blue-600 hover:text-blue-800 text-sm"
-                                                >
-                                                    Edit ABC
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                );
-            };
-
-            const ABCReviewsView = () => {
-                const filteredAssociates = useMemo(() => {
-                    let over680 = Object.values(associates).filter(a => a.totalHours >= 680);
-
-                    // Filter out Delete status if checkbox is unchecked
-                    if (!abcShowDelete) {
-                        over680 = over680.filter(a => a.status !== 'Delete');
-                    }
-
-                    over680.sort((a, b) => b.totalHours - a.totalHours);
-
-                    return over680.filter(a =>
-                        a.name.toLowerCase().includes(abcSearchTerm.toLowerCase())
-                    );
-                }, [associates, abcShowDelete, abcSearchTerm]);
-
-                const over680Count = useMemo(() => {
-                    let count = Object.values(associates).filter(a => a.totalHours >= 680);
-                    if (!abcShowDelete) {
-                        count = count.filter(a => a.status !== 'Delete');
-                    }
-                    return count.length;
-                }, [associates, abcShowDelete]);
-
-                return (
-                    <div className="max-w-6xl mx-auto p-6">
-                        <h2 className="text-2xl font-bold mb-6">ABC Reviews for Associates Over 680 Hours</h2>
-
-                        <div className="mb-6">
-                            <SearchInput
-                                key="abc-search"
-                                id="abc-search-input"
-                                value={abcSearchTerm}
-                                onChange={handleAbcSearchChange}
-                                placeholder="Search associates by name..."
-                            />
-                            <div className="flex items-center justify-between mt-2">
-                                <p className="text-sm text-gray-600">
-                                    Showing {filteredAssociates.length} of {over680Count} associates
-                                </p>
-                                <label className="flex items-center text-sm">
-                                    <input
-                                        type="checkbox"
-                                        checked={abcShowDelete}
-                                        onChange={handleAbcShowDeleteChange}
-                                        className="mr-2"
-                                    />
-                                    Show "Delete" status
-                                </label>
-                            </div>
-                        </div>
-                        
-                        <div className="space-y-4">
-                            {filteredAssociates.map(associate => (
-                                <div key={associate.name} className="border border-gray-300 rounded-lg p-4 bg-white">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div>
-                                            <h3 className="font-bold text-lg">{associate.name}</h3>
-                                            <p className="text-sm text-gray-600">
-                                                {associate.totalHours.toFixed(2)} hours | Shift {associate.shift}
-                                            </p>
-                                        </div>
-                                        <button
-                                            onClick={() => setEditingABC(associate.name)}
-                                            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                                        >
-                                            {associate.abc ? 'Update ABC' : 'Add ABC'}
-                                        </button>
-                                    </div>
-                                    {associate.abc && (
-                                        <div className="mt-2 p-3 bg-gray-50 rounded">
-                                            <p className="font-medium">ABC Score: {associate.abc.total} / 56</p>
-                                            {associate.abc.details && (
-                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2 text-sm">
-                                                    {ABC_CATEGORIES.map(category => (
-                                                        <div key={category}>
-                                                            {category}: {associate.abc.details[category] || '-'}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                );
-            };
-
             const FilteredView = () => {
                 const filtered = getFilteredAssociates()
                     .filter(a => a.totalHours >= 480)
@@ -1304,8 +1349,27 @@
 
                     <main className="py-8">
                         {activeView === 'upload' && <UploadView />}
-                        {activeView === 'allAssociates' && <AllAssociatesView />}
-                        {activeView === 'abcReviews' && <ABCReviewsView />}
+                        {activeView === 'allAssociates' && <AllAssociatesView
+                            associates={associates}
+                            allAssociatesSearchTerm={allAssociatesSearchTerm}
+                            handleAllAssociatesSearchChange={handleAllAssociatesSearchChange}
+                            sortConfig={sortConfig}
+                            selectedWeek={selectedWeek}
+                            handleSort={handleSort}
+                            getSortIndicator={getSortIndicator}
+                            updateAssociateStatus={updateAssociateStatus}
+                            setEditingABC={setEditingABC}
+                            STATUS_OPTIONS={STATUS_OPTIONS}
+                        />}
+                        {activeView === 'abcReviews' && <ABCReviewsView
+                            associates={associates}
+                            abcSearchTerm={abcSearchTerm}
+                            handleAbcSearchChange={handleAbcSearchChange}
+                            abcShowDelete={abcShowDelete}
+                            handleAbcShowDeleteChange={handleAbcShowDeleteChange}
+                            setEditingABC={setEditingABC}
+                            ABC_CATEGORIES={ABC_CATEGORIES}
+                        />}
                         {activeView === 'filtered' && <FilteredView />}
                     </main>
 
