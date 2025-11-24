@@ -730,34 +730,46 @@
                     // Merge with existing data for this week OR previous week (preserve status, notes, ABC)
                     const mergedAssociates = {};
 
-                    // First check if we're updating an existing week
+                    // Always try to get data to carry forward
                     let existingWeekData = {};
-                    if (weekEnding === selectedWeek) {
-                        existingWeekData = associates;
-                    } else if (database) {
+
+                    if (database) {
                         // Load existing week data if it exists
                         const snapshot = await database.ref(`weeks/${weekEnding}`).once('value');
                         const data = snapshot.val();
+
                         if (data && data.associates) {
-                            // Desanitize ABC details when loading from Firebase
+                            // Week already exists - use its data
                             existingWeekData = desanitizeAssociates(data.associates);
+                            console.log(`Updating existing week: ${weekEnding}`);
                         } else {
-                            // Week doesn't exist yet - try to get data from most recent previous week
-                            // to carry forward status, notes, and ABC
+                            // Week doesn't exist yet - get data from most recent previous week
+                            console.log(`New week detected: ${weekEnding}. Looking for previous week data...`);
                             const allWeeksSnapshot = await database.ref('weeks').once('value');
                             const allWeeks = allWeeksSnapshot.val();
+
                             if (allWeeks) {
-                                const sortedWeeks = Object.keys(allWeeks).sort().reverse(); // Most recent first
+                                const weeksList = Object.keys(allWeeks);
+                                console.log(`Available weeks:`, weeksList);
+
+                                // Sort weeks in descending order (most recent first)
+                                const sortedWeeks = weeksList.sort().reverse();
+
                                 // Find the most recent week that comes before the week being uploaded
                                 const previousWeek = sortedWeeks.find(w => w < weekEnding);
+
                                 if (previousWeek && allWeeks[previousWeek] && allWeeks[previousWeek].associates) {
                                     existingWeekData = desanitizeAssociates(allWeeks[previousWeek].associates);
-                                    console.log(`Carrying forward data from previous week: ${previousWeek}`);
+                                    console.log(`✓ Carrying forward data from previous week: ${previousWeek}`);
+                                    console.log(`  - Found ${Object.keys(existingWeekData).length} associates with existing data`);
+                                } else {
+                                    console.log(`No previous week found to carry forward from`);
                                 }
                             }
                         }
                     }
 
+                    // Merge new data with existing data
                     Object.entries(dawkAssociates).forEach(([name, newData]) => {
                         if (existingWeekData[name]) {
                             // Preserve existing status, notes, and ABC
@@ -768,7 +780,12 @@
                                 abc: existingWeekData[name].abc || null
                             };
                         } else {
-                            mergedAssociates[name] = newData;
+                            mergedAssociates[name] = {
+                                ...newData,
+                                status: '',
+                                notes: '',
+                                abc: null
+                            };
                         }
                     });
 
