@@ -727,7 +727,7 @@
                         }
                     });
 
-                    // Merge with existing data for this week OR current associates (preserve status, notes, ABC)
+                    // Merge with existing data for this week OR previous week (preserve status, notes, ABC)
                     const mergedAssociates = {};
 
                     // First check if we're updating an existing week
@@ -741,6 +741,20 @@
                         if (data && data.associates) {
                             // Desanitize ABC details when loading from Firebase
                             existingWeekData = desanitizeAssociates(data.associates);
+                        } else {
+                            // Week doesn't exist yet - try to get data from most recent previous week
+                            // to carry forward status, notes, and ABC
+                            const allWeeksSnapshot = await database.ref('weeks').once('value');
+                            const allWeeks = allWeeksSnapshot.val();
+                            if (allWeeks) {
+                                const sortedWeeks = Object.keys(allWeeks).sort().reverse(); // Most recent first
+                                // Find the most recent week that comes before the week being uploaded
+                                const previousWeek = sortedWeeks.find(w => w < weekEnding);
+                                if (previousWeek && allWeeks[previousWeek] && allWeeks[previousWeek].associates) {
+                                    existingWeekData = desanitizeAssociates(allWeeks[previousWeek].associates);
+                                    console.log(`Carrying forward data from previous week: ${previousWeek}`);
+                                }
+                            }
                         }
                     }
 
