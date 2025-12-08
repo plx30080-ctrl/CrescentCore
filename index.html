@@ -452,6 +452,9 @@
 
             // Pre-configured Firebase settings
             useEffect(() => {
+                console.log('🔥 Initializing Firebase...');
+                console.log('Firebase object available:', typeof firebase !== 'undefined');
+
                 const config = {
                     apiKey: "AIzaSyC2nzjfwl8J31TxGm8XMfmIOaUOpgFy1W8",
                     authDomain: "hours-reporting-eaecc.firebaseapp.com",
@@ -463,56 +466,109 @@
                     measurementId: "G-S8XX0K6PCE"
                 };
 
-                initializeFirebase(config);
+                // Set a timeout in case Firebase never connects
+                const connectionTimeout = setTimeout(() => {
+                    console.error('⏱️ Firebase connection timeout - stopping loading state');
+                    setLoading(false);
+                    setSyncStatus('Connection Timeout');
+                    alert('Firebase connection is taking too long. Please check your internet connection and refresh the page.');
+                }, 10000); // 10 second timeout
+
+                initializeFirebase(config, connectionTimeout);
             }, []);
 
-            const initializeFirebase = (config) => {
+            const initializeFirebase = (config, timeoutId) => {
                 try {
+                    console.log('🔧 Attempting to initialize Firebase app...');
+
+                    if (typeof firebase === 'undefined') {
+                        throw new Error('Firebase SDK not loaded. Please check your internet connection.');
+                    }
+
                     if (!firebase.apps.length) {
                         firebase.initializeApp(config);
+                        console.log('✅ Firebase app initialized successfully');
+                    } else {
+                        console.log('ℹ️ Firebase app already initialized');
                     }
+
                     const db = firebase.database();
+                    console.log('✅ Firebase database reference created');
+
                     setDatabase(db);
                     setFirebaseConfig(config);
                     setFirebaseInitialized(true);
-                    setSyncStatus('Connected');
-                    
+
                     // Load data from Firebase
-                    loadFromFirebase(db);
+                    loadFromFirebase(db, timeoutId);
                 } catch (error) {
-                    console.error('Firebase initialization error:', error);
-                    alert('Error connecting to Firebase. Please check your configuration.');
+                    console.error('❌ Firebase initialization error:', error);
+                    console.error('Error details:', error.message, error.stack);
+                    clearTimeout(timeoutId);
+                    alert('Error connecting to Firebase: ' + error.message + '\n\nPlease check your internet connection and refresh the page.');
                     setShowConfig(true);
                     setLoading(false);
+                    setSyncStatus('Error');
                 }
             };
 
-            const loadFromFirebase = (db) => {
-                // Load list of all available weeks
-                const weeksRef = db.ref('weeks');
-                weeksRef.on('value', (snapshot) => {
-                    const weeksData = snapshot.val();
-                    if (weeksData) {
-                        const weeksList = Object.keys(weeksData).sort().reverse(); // Most recent first
-                        setAvailableWeeks(weeksList);
-                        
-                        // Auto-select most recent week if none selected
-                        if (!selectedWeek && weeksList.length > 0) {
-                            setSelectedWeek(weeksList[0]);
-                        }
-                    }
-                    setLoading(false);
-                });
+            const loadFromFirebase = (db, timeoutId) => {
+                try {
+                    console.log('📡 Setting up Firebase listeners...');
 
-                // Handle connection status
-                const connectedRef = db.ref('.info/connected');
-                connectedRef.on('value', (snap) => {
-                    if (snap.val() === true) {
-                        setSyncStatus('Connected');
-                    } else {
-                        setSyncStatus('Disconnected');
-                    }
-                });
+                    // Load list of all available weeks
+                    const weeksRef = db.ref('weeks');
+
+                    weeksRef.on('value', (snapshot) => {
+                        console.log('✅ Received data from Firebase');
+                        clearTimeout(timeoutId); // Clear timeout on successful connection
+
+                        const weeksData = snapshot.val();
+                        console.log('Weeks data:', weeksData ? Object.keys(weeksData) : 'No data');
+
+                        if (weeksData) {
+                            const weeksList = Object.keys(weeksData).sort().reverse(); // Most recent first
+                            setAvailableWeeks(weeksList);
+                            console.log('📅 Available weeks:', weeksList);
+
+                            // Auto-select most recent week if none selected
+                            if (!selectedWeek && weeksList.length > 0) {
+                                setSelectedWeek(weeksList[0]);
+                                console.log('📌 Auto-selected week:', weeksList[0]);
+                            }
+                        } else {
+                            console.log('ℹ️ No weeks data found in Firebase');
+                        }
+
+                        setLoading(false);
+                        console.log('✅ Loading complete');
+                    }, (error) => {
+                        console.error('❌ Error loading weeks data:', error);
+                        console.error('Error code:', error.code);
+                        console.error('Error message:', error.message);
+                        clearTimeout(timeoutId);
+                        setLoading(false);
+                        setSyncStatus('Error');
+                        alert('Error loading data from Firebase: ' + error.message + '\n\nYou may not have permission to access this database.');
+                    });
+
+                    // Handle connection status
+                    const connectedRef = db.ref('.info/connected');
+                    connectedRef.on('value', (snap) => {
+                        if (snap.val() === true) {
+                            console.log('🟢 Firebase connected');
+                            setSyncStatus('Connected');
+                        } else {
+                            console.log('🔴 Firebase disconnected');
+                            setSyncStatus('Disconnected');
+                        }
+                    });
+                } catch (error) {
+                    console.error('❌ Error setting up Firebase listeners:', error);
+                    clearTimeout(timeoutId);
+                    setLoading(false);
+                    setSyncStatus('Error');
+                }
             };
 
             // Load data for selected week
