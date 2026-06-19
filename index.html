@@ -150,10 +150,13 @@
             handleAllAssociatesSearchChange,
             sortConfig,
             selectedWeek,
+            previousWeek,
             handleSort,
             getSortIndicator,
             updateAssociateStatus,
             setEditingABC,
+            onResync,
+            resyncing,
             STATUS_OPTIONS
         }) => {
             const over680 = useMemo(() => {
@@ -201,11 +204,22 @@
                 <div className="max-w-7xl mx-auto p-6">
                     <div className="flex justify-between items-center mb-6">
                         <h2 className="text-2xl font-bold">All Associates Over 680 Hours</h2>
-                        {selectedWeek && (
-                            <div className="text-sm bg-blue-100 text-blue-800 px-4 py-2 rounded-lg">
-                                Viewing Week Ending: <strong>{selectedWeek}</strong>
-                            </div>
-                        )}
+                        <div className="flex items-center gap-3">
+                            {previousWeek && (
+                                <button
+                                    onClick={onResync}
+                                    disabled={resyncing}
+                                    className="text-sm bg-orange-100 text-orange-800 border border-orange-300 px-3 py-2 rounded-lg hover:bg-orange-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {resyncing ? 'Re-syncing...' : `Re-sync status/notes/ABC from ${previousWeek}`}
+                                </button>
+                            )}
+                            {selectedWeek && (
+                                <div className="text-sm bg-blue-100 text-blue-800 px-4 py-2 rounded-lg">
+                                    Viewing Week Ending: <strong>{selectedWeek}</strong>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     <div className="mb-6">
@@ -442,6 +456,7 @@
             const [abcSearchTerm, setAbcSearchTerm] = useState('');
             const [allAssociatesSearchTerm, setAllAssociatesSearchTerm] = useState('');
             const [abcShowDelete, setAbcShowDelete] = useState(true);
+            const [resyncing, setResyncing] = useState(false);
 
             // Stable callback handlers to prevent re-creation
             const handleAbcSearchChange = useCallback((e) => {
@@ -819,26 +834,24 @@
                         } else {
                             // Week doesn't exist yet - get data from most recent previous week
                             console.log(`New week detected: ${weekEnding}. Looking for previous week data...`);
-                            const allWeeksSnapshot = await database.ref('weeks').once('value');
-                            const allWeeks = allWeeksSnapshot.val();
+                            console.log(`Available weeks:`, availableWeeks);
 
-                            if (allWeeks) {
-                                const weeksList = Object.keys(allWeeks);
-                                console.log(`Available weeks:`, weeksList);
+                            // Use already-loaded availableWeeks instead of re-fetching all weeks
+                            const sortedWeeks = [...availableWeeks].sort().reverse();
+                            const previousWeek = sortedWeeks.find(w => w < weekEnding);
 
-                                // Sort weeks in descending order (most recent first)
-                                const sortedWeeks = weeksList.sort().reverse();
-
-                                // Find the most recent week that comes before the week being uploaded
-                                const previousWeek = sortedWeeks.find(w => w < weekEnding);
-
-                                if (previousWeek && allWeeks[previousWeek] && allWeeks[previousWeek].associates) {
-                                    existingWeekData = desanitizeAssociates(allWeeks[previousWeek].associates);
+                            if (previousWeek) {
+                                // Load only the previous week directly instead of all weeks
+                                const prevSnapshot = await database.ref(`weeks/${previousWeek}`).once('value');
+                                const prevData = prevSnapshot.val();
+                                if (prevData && prevData.associates) {
+                                    existingWeekData = desanitizeAssociates(prevData.associates);
+                                    const deleteCount = Object.values(existingWeekData).filter(a => a.status === 'Delete').length;
                                     console.log(`✓ Carrying forward data from previous week: ${previousWeek}`);
-                                    console.log(`  - Found ${Object.keys(existingWeekData).length} associates with existing data`);
-                                } else {
-                                    console.log(`No previous week found to carry forward from`);
+                                    console.log(`  - Found ${Object.keys(existingWeekData).length} associates (${deleteCount} with Delete status)`);
                                 }
+                            } else {
+                                console.log(`No previous week found to carry forward from`);
                             }
                         }
                     }
@@ -862,6 +875,13 @@
                             };
                         }
                     });
+
+                    // Warn about Delete-status associates from previous week not found in new DAWK file
+                    const missedDeletes = Object.entries(existingWeekData)
+                        .filter(([name, data]) => data.status === 'Delete' && !dawkAssociates[name]);
+                    if (missedDeletes.length > 0) {
+                        console.warn(`⚠️ ${missedDeletes.length} Delete-status associate(s) not found in new DAWK file (name mismatch or no longer in report):`, missedDeletes.map(([name]) => name));
+                    }
 
                     const totalCount = Object.keys(mergedAssociates).length;
                     const over680Count = Object.values(mergedAssociates).filter(a => a.totalHours >= 680).length;
@@ -891,7 +911,7 @@
                     }
                 };
                 setAssociates(updated);
-                await saveToFirebase(updated, weekEnding);
+                await saveToFirebase(updated, selectedWeek);
             };
 
             const updateAssociateABC = async (name, abcData) => {
@@ -904,8 +924,74 @@
                 };
                 setAssociates(updated);
                 // Sanitization is handled in saveToFirebase
-                await saveToFirebase(updated, weekEnding);
+                await saveToFirebase(updated, selectedWeek);
                 setEditingABC(null);
+            };
+
+            const previousWeek = useMemo(() => {
+                if (!selectedWeek || availableWeeks.length === 0) return null;
+                const sorted = [...availableWeeks].sort().reverse();
+                const idx = sorted.indexOf(selectedWeek);
+                return idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
+            }, [selectedWeek, availableWeeks]);
+
+            const resyncFromPreviousWeek = async () => {
+                if (!previousWeek || !database) return;
+                setResyncing(true);
+                try {
+                    const prevSnapshot = await database.ref(`weeks/${previousWeek}`).once('value');
+                    const prevData = prevSnapshot.val();
+                    if (!prevData || !prevData.associates) {
+                        alert(`No data found for ${previousWeek}.`);
+                        return;
+                    }
+                    const prevAssociates = desanitizeAssociates(prevData.associates);
+
+                    // Fill in missing status/notes/ABC from the previous week
+                    const changes = [];
+                    const updated = {};
+                    Object.entries(associates).forEach(([name, cur]) => {
+                        const prev = prevAssociates[name];
+                        if (!prev) { updated[name] = cur; return; }
+
+                        const patch = {};
+                        if (prev.status && !cur.status) patch.status = prev.status;
+                        if (prev.notes && !cur.notes) patch.notes = prev.notes;
+                        if (prev.abc && !cur.abc) patch.abc = prev.abc;
+
+                        if (Object.keys(patch).length > 0) {
+                            changes.push({ name, patch });
+                            updated[name] = { ...cur, ...patch };
+                        } else {
+                            updated[name] = cur;
+                        }
+                    });
+
+                    if (changes.length === 0) {
+                        alert('No missing data found — all associates already have status, notes, and ABC for this week.');
+                        return;
+                    }
+
+                    // Build preview grouped by what changed
+                    const byStatus = changes.filter(c => c.patch.status).map(c => `• ${c.name}: → "${c.patch.status}"`);
+                    const byNotes = changes.filter(c => c.patch.notes && !c.patch.status);
+                    const byABC = changes.filter(c => c.patch.abc && !c.patch.status && !c.patch.notes);
+                    let preview = '';
+                    if (byStatus.length) preview += `Status updates (${byStatus.length}):\n${byStatus.slice(0, 15).join('\n')}${byStatus.length > 15 ? `\n  ...and ${byStatus.length - 15} more` : ''}\n\n`;
+                    if (byNotes.length) preview += `Notes only (${byNotes.length} associates)\n\n`;
+                    if (byABC.length) preview += `ABC only (${byABC.length} associates)\n`;
+
+                    if (!window.confirm(`Re-sync from ${previousWeek} will fill in missing data for ${changes.length} associate(s):\n\n${preview.trim()}\n\nProceed?`)) return;
+
+                    setAssociates(updated);
+                    await saveToFirebase(updated, selectedWeek);
+                    alert(`Re-sync complete. Updated ${changes.length} associate(s) from ${previousWeek}.`);
+                } catch (err) {
+                    console.error('Re-sync error:', err);
+                    alert('Re-sync failed: ' + err.message);
+                } finally {
+                    setResyncing(false);
+                }
             };
 
             const sortAssociates = (data, key) => {
@@ -1467,10 +1553,13 @@
                             handleAllAssociatesSearchChange={handleAllAssociatesSearchChange}
                             sortConfig={sortConfig}
                             selectedWeek={selectedWeek}
+                            previousWeek={previousWeek}
                             handleSort={handleSort}
                             getSortIndicator={getSortIndicator}
                             updateAssociateStatus={updateAssociateStatus}
                             setEditingABC={setEditingABC}
+                            onResync={resyncFromPreviousWeek}
+                            resyncing={resyncing}
                             STATUS_OPTIONS={STATUS_OPTIONS}
                         />}
                         {activeView === 'abcReviews' && <ABCReviewsView
