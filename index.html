@@ -7,6 +7,19 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script>
+        // @babel/preset-react now defaults to the "automatic" JSX runtime, which emits
+        // `import` statements. Those cannot appear in a non-module <script> tag.
+        // Register a custom preset that explicitly uses the classic runtime so Babel
+        // keeps the React.createElement calls that are already in scope via the UMD build.
+        Babel.registerPreset('react-classic', function() {
+            return {
+                presets: [
+                    [Babel.availablePresets['react'], { runtime: 'classic' }]
+                ]
+            };
+        });
+    </script>
     <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
@@ -38,7 +51,7 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel" data-presets="react">
+    <script type="text/babel" data-presets="react-classic">
         const { useState, useEffect, useCallback, useMemo } = React;
 
         // Status options for dropdown
